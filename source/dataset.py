@@ -1,22 +1,23 @@
+from dgl.dataloading import GraphDataLoader
 import os
-import re
 
-import deepchem as dc
+import dgl
 import pandas as pd
-import rdkit
 import requests
 import selfies as sf
 import torch
-from rdkit import Chem
+from dgllife.utils import smiles_to_complete_graph
+from dgl.data import DGLDataset
+from graphein.molecule.config import MoleculeGraphConfig
+from graphein.molecule.graphs import construct_graph as consrtuct_molecule
+from graphein.protein.config import ProteinGraphConfig
+from graphein.protein.graphs import construct_graph as consrtuct_protein
 from torch_geometric.data import Data, Dataset
 from tqdm import tqdm
 
-DATA_PATH = "data/raw/ta_dataset_v3.csv"
-data = pd.read_csv(DATA_PATH, sep=";")
-
 
 def get_smiles_selfies(
-	filename: str = "liste_substrats_accepteurs.txt",
+        filename: str = "liste_substrats_accepteurs.txt",
     save: bool = False, output: str = None
 ) -> pd.DataFrame:
 
@@ -53,77 +54,78 @@ def get_smiles_selfies(
         )
     return df
 
+class TADataset(DGLDataset):
+    def __init__(
+        self,
+        raw_dir=None,
+        enz_config=None,
+        mol_config=None,
+        url=None,
+        save_dir=None,
+        force_reload=False,
+        verbose=False,
+    ):
 
-class PairData(Data):
-    def __inc__(self, key, value, *args):
-        if bool(re.search('index_s', key)):
-            return self.x_s.size(0)
-        if bool(re.search('index_t', key)):
-            return self.x_t.size(0)
+        if enz_config is None:
+            self.enz_config = ProteinGraphConfig()
         else:
-            return 0
+            self.enz_config = ProteinGraphConfig(config=enz_config)
 
+        if mol_config is None:
+            self.mol_config = MoleculeGraphConfig()
+        else:
+            self.mol_config = MoleculeGraphConfig(config=mol_config)
 
-class TADataset(Dataset):
-    def __init__(self, root, filename, transform=None, pre_transform=None) -> None:
-        self.filename = filename
-        super(TADataset, self).__init__(root, transform, pre_transform)
-
-    @property
-    def raw_file_names(self):
-        return self.filename
-
-    @property
-    def processed_file_names(self):
-        self.data = pd.read_csv(self.raw_paths[0], sep=";").reset_index()
-        return [f'ta_dataset_{i}.pt' for i in list(self.data.index)]
-
-    def download(self):
-        pass
+        super(TADataset, self).__init__(
+            name="ta_dataset",
+            raw_dir=raw_dir,
+        )
 
     def process(self):
-        self.data = pd.read_csv(self.raw_paths[0], sep=";").reset_index()
-        featurizer = dc.feat.MolGraphConvFeaturizer(use_edges=True)
-        for index, row in tqdm(self.data.iterrows(), total=self.data.shape[0]):
+        self.enz = []
+        self.sub = []
+        self.labels = []
+
+        data = pd.read_csv(self.raw_dir, sep=";").reset_index()
+        for index, row in tqdm(data.iterrows(), total=data.shape[0]):
             act = torch.tensor(row.activity, dtype=torch.float32)
+            self.labels.append(act)
+
+            # constructing enzyme graph
+            pdb_path = os.path.join("data/raw/enzymes", row.enzyme, row.enzyme+"_relaxed.pdb")
+            enz = consrtuct_protein(config=self.enz_config, pdb_path=pdb_path)
+            enz = dgl.from_networkx(enz)  # convert to torch.tensor
+            self.enz.append(enz)
 
             # constructing molecular graphs
-            mol = Chem.MolFromSmiles(row.smiles)
-            f = featurizer._featurize(mol)
+            sub = consrtuct_molecule(config=self.mol_config, smiles=row.smiles)
+            sub = smiles_to_complete_graph(sub)  # convert to torch.tensor
+            self.sub.append(sub)
 
-            # constructing enzyme graphs
-            # not yet implemented
-
-            data = PairData(
-                x_s=f.node_features,
-                edge_index_s=f.edge_index,
-                edge_attr_s=f.edge_features,
-                x_t=None,
-                edge_index_t=None,
-                edge_attr_t=None,
-                y=act,
-            )
-
-            torch.save(
-                data,
-                os.path.join(self.processed_dir, f"data_{index}.pt")
-            )
-            # break
-
-    def _get_label(self, label):
-        return torch.tensor([label,], dtype=torch.float32)
+    def __getitem__(self, idx):
+        return (
+            self.enz[idx],
+            self.sub[idx],
+            self.labels[idx],
+        )
 
     def __len__(self):
-        return self.data.size(0)
-
-    def __getitem__(self, index):
-        return torch.load(
-            os.path.join(self.processed_dir, f"data_{index}.pt")
-        )
+        return len(self.enz)
 
 
 # test
+data_path = "data/raw/ta_dataset_small.csv"
 ds = TADataset(
-    root="data/",
-    filename="ta_dataset_small.csv",
+    raw_dir=data_path,
+    enz_config=None,
+    mol_config=None,
 )
+
+
+dataloader = GraphDataLoader(ds, batch_size=2, shuffle=False)
+for epoch in range(100):
+    for a, b, labels in dataloader:
+        print(a)
+        # print(labels)
+        break
+    break
