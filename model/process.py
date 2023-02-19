@@ -1,9 +1,52 @@
 import os
 import warnings
-
-from tqdm import tqdm
 from itertools import zip_longest
 from urllib.request import urlopen
+
+import pandas as pd
+from tqdm import tqdm
+
+
+def get_smiles_selfies(
+    filename: str = "liste_substrats_accepteurs.txt",
+    save: bool = False, output: str = None
+) -> pd.DataFrame:
+
+    import requests
+    import selfies as sf
+
+    def encoder(mol: str, to_selfies: bool = False):
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{mol}/property/CanonicalSMILES/TXT"
+        smiles = requests.get(url).text.rstrip()
+        if "NotFound" in smiles:
+            return None
+        elif to_selfies:
+            return sf.encoder(smiles)
+        return smiles
+
+    df = pd.DataFrame(columns=["name", "smiles", "selfies"])
+    with open(filename, "r") as file:
+        lines = file.readlines()
+        for x in lines:
+            x = x[:-1]
+            print(x)
+            new_row = pd.Series({
+                "name": x,
+                "smiles": encoder(x), "selfies": encoder(x, True)
+            })
+
+            df = pd.concat(
+                [df, new_row.to_frame().T],
+                ignore_index=True,
+            )
+    df.drop_duplicates(subset=["names",], inplace=True)
+    if save:
+        df.to_csv(
+            output,
+            sep=";",
+            index=False,
+        )
+    return df
 
 
 def monomer_to_dimer(dir):
