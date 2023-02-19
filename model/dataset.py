@@ -134,21 +134,21 @@ class TADataset(Dataset):
             act = torch.tensor(row.activity, dtype=torch.float32)
 
             # constructing molecular graphs
-            g = smiles.from_smiles(row.smiles)
+            ga = smiles.from_smiles(row.smiles)
 
             # constructing enzyme graphs
             config = ProteinGraphConfig()
             pdb_path = os.path.join(self.raw_paths[1], row.enzyme+"_relaxed.pdb")
-            g = construct_graph(config=config, pdb_path=pdb_path)
-            g = GraphFormatConvertor(
+            gb = construct_graph(config=config, pdb_path=pdb_path)
+            gb = GraphFormatConvertor(
                 "nx", "pyg",
                 verbose="gnn",
                 columns=None
             ).convert_nx_to_pyg(g)
 
             data = PairData(
-                g.x, g.edge_index, g.edge_attr,  # enzyme
-                g.x, g.edge_index, g.edge_attr,  # substrat
+                ga.x, ga.edge_index, ga.edge_attr,  # substrat
+                None, gb.edge_index, None,          # enzyme
                 y=act,
             )
             self.all_data.append(data)
