@@ -12,18 +12,12 @@ sub_smiles_seq = "C(=O)C(=O)O"
 def get_complex(
     database:str,
     output:str,
-    temp_dir: str = None,
 ):
 
     if not os.path.exists(output):
         os.makedirs(output)
     else:
         shutil.rmtree(output)
-
-    if not os.path.exists(temp_dir):
-        os.makedirs(temp_dir)
-    else:
-        shutil.rmtree(temp_dir)
 
     data = pd.read_csv(database, sep=";").reset_index()
     for index, row in tqdm(data.iterrows(), total=data.shape[0]):
@@ -34,35 +28,33 @@ def get_complex(
             f"{row.enzyme}",
             f"{row.enzyme}_relaxed.pdb",
         )
-        out_sub_path = os.path.join(temp_dir, f"{row.substrat}.sdf")
 
         # convert smiles to sdf
-        if not os.path.exists(out_sub_path):
-            open(f"{row.substrat}.smi", "w").writelines(f"{row.smiles}\n")
+        open(f"{row.substrat}.smi", "w").writelines(f"{row.smiles}\n")
 
-            os.system(f"""
-                obabel \
-                {row.substrat}.smi \
-                -O {out_sub_path} \
-                --gen3d
-            """)
+        os.system(f"""
+            obabel \
+            {row.substrat}.smi \
+            -O {f"{row.substrat}.sdf"} \
+            --gen3d
+        """)
+        os.remove(f"{row.substrat}.smi")
 
         # docking with gnina
         os.system(f"""
             gnina/build/bin/gnina \
             -r {enz_path} \
-            -l {out_sub_path} \
-            --autobox_ligand {row.enzyme}.pdb \
-            -o docked_{row.enzyme.lower()}_{row.substrat.replace(",", "_").lower()}.pdb \
+            -l {row.substrat}.sdf \
+            --autobox_ligand {enz_path} \
+            -o {output}/docked_{row.enzyme.lower()}_{row.substrat.replace(",", "_").lower()}.pdb \
             --exhaustiveness 64
         """)        
-        break
-
-    shutil.rmtree(temp_dir)
+        os.remove(f"{row.substrat}.sdf")
 
 
-get_complex(
-    database="data/raw/ta_dataset_v3.csv",
-    output="data/raw/complex",
-    temp_dir="data/raw/temp",
-)
+
+if __name__ == "__main__":
+    get_complex(
+        database="data/raw/ta_dataset_v3.csv",
+        output="data/raw/complex",
+    )
