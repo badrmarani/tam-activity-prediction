@@ -14,6 +14,11 @@ def get_complex(
     output:str,
 ):
 
+    # at the moment, this code only takes into account the presence
+    # of the enzyme and the amine donor, which is not the case in a
+    # reaction involving the transaminase. i need to understand the
+    # reaction well to know how to integrate the amine acceptor.
+    
     if not os.path.exists(output):
         os.makedirs(output)
     else:
