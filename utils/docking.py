@@ -3,11 +3,19 @@ import shutil
 import pandas as pd
 
 from tqdm import tqdm
-from process import get_smiles_selfies
 
-enz_name = "C7RAM1"
-sub_name = "2OATA"
-sub_smiles_seq = "C(=O)C(=O)O"
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from rdkit.Chem import rdMolAlign
+from rdkit.Chem import rdDistGeom
+from rdkit.Chem import rdmolfiles
+
+def combine_sdf_pdb(sdf_file, pdb_file):
+    molecule = Chem.MolFromMolFile(sdf_file)
+    conf = molecule.GetConformer()
+    positions = [conf.GetAtomPosition(i) for i in range(molecule.GetNumAtoms())]
+    print(positions)
+
 
 def get_complex(
     database:str,
@@ -59,7 +67,12 @@ def get_complex(
 
 
 if __name__ == "__main__":
-    get_complex(
-        database="data/raw/ta_dataset_v3.csv",
-        output="data/raw/complex",
+    # get_complex(
+    #     database="data/raw/ta_dataset_v3.csv",
+    #     output="data/raw/complex",
+    # )
+
+    combine_sdf_pdb(
+        sdf_file="examples/sub.sdf",
+        pdb_file="examples/enz.pdb",
     )

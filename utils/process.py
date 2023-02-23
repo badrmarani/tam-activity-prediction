@@ -4,12 +4,14 @@ from itertools import zip_longest
 from urllib.request import urlopen
 
 import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import AllChem
 from tqdm import tqdm
 
 
 def get_smiles_selfies(
-    filename: str = "liste_substrats_accepteurs.txt",
-    save: bool = False, output: str = None
+    path_or_molname: str = "liste_substrats_accepteurs.txt",
+    output: str = None
 ) -> pd.DataFrame:
 
     import requests
@@ -24,15 +26,22 @@ def get_smiles_selfies(
             return sf.encoder(smiles)
         return smiles
 
+    if not os.path.exists(path_or_molname):
+        return {
+            "name": path_or_molname,
+            "smiles": encoder(path_or_molname, to_selfies=False),
+            "selfies": encoder(path_or_molname, to_selfies=True),
+        }
+
     df = pd.DataFrame(columns=["name", "smiles", "selfies"])
-    with open(filename, "r") as file:
+    with open(path_or_molname, "r") as file:
         lines = file.readlines()
         for x in lines:
             x = x[:-1]
             print(x)
             new_row = pd.Series({
                 "name": x,
-                "smiles": encoder(x), "selfies": encoder(x, True)
+                "smiles": encoder(x), "selfies": encoder(x, to_selfies=True)
             })
 
             df = pd.concat(
@@ -40,7 +49,7 @@ def get_smiles_selfies(
                 ignore_index=True,
             )
     df.drop_duplicates(subset=["names",], inplace=True)
-    if save:
+    if output is not None and isinstance(output, str):
         df.to_csv(
             output,
             sep=";",
@@ -48,8 +57,19 @@ def get_smiles_selfies(
         )
     return df
 
+def get_substrat_sdf(substrat_name: str):
+    sub_all_infos = get_smiles_selfies(substrat_name)
+    seq = sub_all_infos["smiles"]
 
-def monomer_to_dimer(dir):
+    mol = Chem.MolFromSmiles(seq)
+    mol = Chem.AddHs(mol)
+    AllChem.EmbedMolecule(mol,AllChem.ETKDG())
+    writer = Chem.SDWriter("{}.sdf".format(substrat_name.replace(" ", "_")))
+    mol.SetProp("_Name", substrat_name.capitalize())
+    mol.SetProp("_SMILES", seq)
+    writer.write(mol)
+
+def fasta_monomer_to_dimer(dir):
     files = os.listdir(dir)
 
     for file in tqdm(files):
@@ -65,7 +85,7 @@ def monomer_to_dimer(dir):
         open(full_path, "w").writelines(lines)
 
 
-def rename_fasta_files(dir):
+def clean_fasta_files(dir):
     if not os.path.exists(dir):
         return None
 
@@ -105,7 +125,7 @@ def get_fasta(output_dir):
                 warnings.warn(f"ERROR: {enz} has been deleted from UniProtKB")
 
 
-def predict_enzyme_structure(fasta_dir, output_dir):
+def predict_enzyme_structure_colabfold(fasta_dir, output_dir):
 
     def grouper(iterable, n, fillvalue=None):
         args = [iter(iterable)] * n
@@ -160,10 +180,3 @@ def predict_enzyme_structure(fasta_dir, output_dir):
                 {fasta_dir+f3} \
                 {enz_out3} \
         """)
-
-
-if __name__ == "__main__":
-    predict_enzyme_structure(
-        fasta_dir=None,
-        output_dir=None
-    )
