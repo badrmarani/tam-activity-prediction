@@ -1,16 +1,21 @@
 import os
+import pickle
 
 import dgl
 import pandas as pd
 import torch
 from biopandas.pdb import PandasPdb
-from torch_geometric.data import Data, Dataset
-from torch_geometric.utils import smiles
-from tqdm import tqdm
-
 from graphein.ml.conversion import GraphFormatConvertor
 from graphein.protein.config import ProteinGraphConfig
 from graphein.protein.graphs import construct_graph
+from process import get_smiles_selfies
+from rdkit import Chem
+from torch.utils import data as torch_data
+from torch_geometric.data import Data, Dataset
+from torch_geometric.utils import smiles
+from torchdrug import data, utils
+from torchdrug.core import Registry
+from tqdm import tqdm
 
 
 def pdb_to_graph(filename, contain_b_factor=True):
@@ -38,6 +43,79 @@ def pdb_to_graph(filename, contain_b_factor=True):
         b_factor = torch.from_numpy(aa_df["b_factor"].values)
         graph.ndata["b_factor"] = b_factor
     return graph
+
+
+@Registry.register("datasets.TAM")
+class TAM(data.ProteinDataset):
+
+    ta_dataset = "dataset/ta_dataset_v4_L_Glutamate.csv"
+    out_file = "dataset/tttam_l_glutamate.pkl"
+    target_fields = ["activity"]
+
+    def __init__(self, path, processed_file=None, verbose=1, **kwargs):
+        path = os.path.expanduser(path)
+        if not os.path.exists(path):
+            os.makedirs(path)
+        self.path = path
+
+        self.transform = None
+        self.ta = pd.read_csv(self.ta_dataset, sep=";")
+        self.data = []
+        self.targets = {"act": []}
+
+        if not processed_file:
+            self.load_pairs(verbose=verbose, **kwargs)
+            out = {"data": self.data, "act": self.targets}
+            with open(self.out_file, "wb") as f:
+                pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)
+        else:
+            with open(self.out_file, "rb") as f:
+                out = pickle.load(f)
+            self.data = out["data"]
+            self.targets = out["act"]
+    
+
+    def load_pairs(self, transform=None, lazy=None, verbose=0):
+        self.transform = transform
+        self.lazy = lazy
+
+        df = tqdm(self.ta.iterrows(), total=self.ta.shape[0]) if verbose else self.ta.iterrows()
+        for idx, row in df:
+            pdb_file = os.path.join("dataset/enzymes", row.enzyme, f"{row.enzyme}_relaxed.pdb")
+            graph1 = data.Protein.from_pdb(
+                pdb_file=pdb_file,
+                atom_feature="default",
+                bond_feature="default",
+                residue_feature="symbol",
+                mol_feature=None,
+                kekulize=True)
+            
+            seq = get_smiles_selfies(row.acceptor_name)["smiles"]
+            mol = Chem.MolFromSmiles(seq)
+            graph2 = data.Molecule.from_molecule(
+                mol,
+                atom_feature="default",
+                bond_feature="default",
+                kekulize=True)
+
+            self.data.append([graph1, graph2])
+            self.targets["act"].append(row.activity)
+            
+            # out = {"data": self.data, "act": self.targets}
+            # with open(self.out_file, "wb") as f:
+            #     pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+
+    def get_item(self, index):
+        item = {
+            "graph1": self.data[index][0],
+            "graph2": self.data[index][1],
+            "act": self.targets["act"][index]
+        }
+
+        if self.transform:
+            item = self.transform(item)
+        return item
 
 
 class PairData(Data):
